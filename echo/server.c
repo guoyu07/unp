@@ -39,9 +39,20 @@ int main() {
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(SERV_PORT); 
 
-    listenfd = socket(AF_INET, SOCK_STREAM, 0);
-    bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
-    listen(listenfd, MAX_CLIENTS);
+    if((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+	perror("socket");
+	exit(1);
+    }
+    
+    if(bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
+	perror("bind");
+	exit(1);
+    }
+
+    if(listen(listenfd, MAX_CLIENTS) < 0) {
+	perror("listen");
+	exit(1);
+    }
 
     client[0].fd = listenfd;
     client[0].events = POLLRDNORM;
@@ -50,9 +61,7 @@ int main() {
     }
     maxi = 0;
 
-    err_msg("start ...");
-    printf("r..\n");
-    fflush(stdout);
+    err_msg("start ...\n");
     for( ; ; ) {
 	nready = poll(client, maxi + 1, INFTIM);
 	
@@ -63,14 +72,9 @@ int main() {
 	    for(i = 1; i < OPEN_MAX; i++) {
 		if(client[i].fd < 0) {
 		    client[i].fd = connfd;
-		    err_msg("con\n");
-		    printf("aaa");
-		    fflush(stdout);
-		    /*
-		    printf("connection from %s, port%d\n",
+		    printf("connection from %s:%d at %d\n",
 			inet_ntop(AF_INET, &cliaddr.sin_addr, buf, sizeof(buf)),
-			ntohs(cliaddr.sin_port));
-		    */
+			ntohs(cliaddr.sin_port), connfd);
 		    break;
 		}
 	    }
@@ -105,6 +109,8 @@ int main() {
 			continue;
 		    }
 		} else if(n == 0) {
+		    /*client send FIN*/
+		    printf("client down at %d\n", client[i].fd);
 		    close(sockfd);
 		    client[i].fd = -1;
 		} else

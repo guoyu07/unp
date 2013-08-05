@@ -26,7 +26,10 @@ int main(int argc, char *argv[]) {
     servaddr.sin_port = htons(SERV_PORT);
     
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
+	perror("connect");
+	exit(1);
+    }
 
     str_cli(stdin, sockfd);
     exit(0);
