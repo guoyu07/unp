@@ -26,6 +26,8 @@ void event_read_handle(connection_t *);
 void event_del_conn(connection_t *);
 void event_init(int);
 void event_process();
+void event_add_conn_write(connection_t *);
+void event_del_conn_write(connection_t *);
 
 void set_nonblock(int fd) {
     int val;
@@ -257,14 +259,31 @@ void err_msg(const char *buf) {
 
 void chat_broadcast(const char *buf, size_t n) {
     int j = 1;
+    ssize_t len;
+    connection_t *c;
 
     for(j = 1; j <= maxi; j++) {
 	if(eventfd[j].fd < 0) {
 	    continue;
 	}
 
-	conn_write(fd2conn[eventfd[j].fd], buf, n);
+	c = (connection_t *) fd2conn[eventfd[j].fd];
+
+	len = conn_write(c, buf, n);
+	if(len > 0) {
+	    event_add_conn_write(c);
+	} else if(len == 0) {
+	    event_del_conn_write(c);
+	}
     }
+}
+
+void event_add_conn_write(connection_t *c) {
+    eventfd[c->index].events |= POLLOUT;
+}
+
+void event_del_conn_write(connection_t *c) {
+    eventfd[c->index].events &= ~POLLOUT;
 }
 
 void chat_welcome(connection_t *c){

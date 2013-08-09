@@ -9,6 +9,8 @@ static connection_t *connections;
 static connection_t *free_conn;
 static int free_conn_n;
 
+static ssize_t conn_flush_wbuf(connection_t *c);
+
 connection_t * conn_init_pool(int n) {
     connection_t *c, *next;
     int i;
@@ -59,9 +61,10 @@ void conn_free(connection_t *c) {
     free_conn_n++;
 }
 
-void conn_write(connection_t *c, const char *buf, size_t n) {
+/* return wbuf len, if > 0, then need add event write*/
+ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
     int i;
-    size_t nwritten;
+    ssize_t nwritten;
 
     /*no data in write buf*/
     if(c->wbuf.i == c->wbuf.o) {
@@ -71,39 +74,44 @@ void conn_write(connection_t *c, const char *buf, size_t n) {
 		i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
 		/* data was large then wbuf, drop it*/
 		if(i < n) {
-		    return;
+		    return 0;
 		}
 		memcpy(c->wbuf.i, buf, n);
 		c->wbuf.i += n;
-		/* 
-		 * @todo add write on eventfd
-		 */
-		return;
+		return n;
 	    } else {
 		fprintf(stderr, "write error to socket");
-		return;
+		return -1;
 	    }
 	}
 
-	if (nwritten == n) return;
+	if (nwritten == n) return 0;
 
 	i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
+	/*
+	 * The remaining data is too large to buffer can't hold
+	 * This situation should be avoided
+	 */
 	if(i < (n - nwritten)) {
-	    /**
-	     * @todo
-	     */
-	    return;
+	    return 0;
 	}
-	i = n - nwritten;
 
+	i = n - nwritten;
 	memcpy(c->wbuf.i, buf + nwritten, i);
 	c->wbuf.i += i;
-	return;
+	return i;
     }
 
     i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
+    /*
+     * wbuf's free space is not enough to storage, drop it or other
+     */
     if(i < n) {
-	return;
+	/*
+	 * @todo try write wbuf data to socket, may be realse some space
+	 */
+	conn_flush_wbuf(c);
+	return -1;
     }
     memcpy(c->wbuf.i, buf, n);
     c->wbuf.i += n;
@@ -112,15 +120,22 @@ void conn_write(connection_t *c, const char *buf, size_t n) {
     if((nwritten = write(c->fd, c->wbuf.o, i)) < 0) {
 	/* socket send buffer has no space*/
 	if(errno == EWOULDBLOCK) {
-	    return;
+	    return i;
 	} else {
 	    fprintf(stderr, "write error to socket");
-	    return;
+	    return -1;
 	}
     }
 
     c->wbuf.o += nwritten;
-    if(c->wbuf.o == c->wbuf.i)
+    if(c->wbuf.o == c->wbuf.i) {
 	c->wbuf.o = c->wbuf.i = c->wbuf.buf;
+	return 0;
+    }
+
+    return c->wbuf.i - c->wbuf.o;
 }
 
+ssize_t conn_flush_wbuf(connection_t *c) {
+    return c->wbuf.i - c->wbuf.o;
+}
