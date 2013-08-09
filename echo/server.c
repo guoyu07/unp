@@ -9,22 +9,30 @@
 #include <stdlib.h>
 #include <time.h>
 #include <limits.h>
+#include <fcntl.h>
 #include "echo.h"
 #include "connection.h"
 
 #define MAX_CLIENTS 64
 
-
-void chat_send(connection_t *, const char *, size_t);
 void chat_broadcast(const char *, size_t);
 void err_msg(const char *);
-void chat_welcome(int);
+void chat_welcome(connection_t *);
 
 int event_accept(int);
 void dump_conn(connection_t *);
 connection_t * event_get_conn(int);
 void event_read_handle(connection_t *);
 void event_del_conn(connection_t *);
+void event_init(int);
+void event_process();
+
+void set_nonblock(int fd) {
+    int val;
+
+    val = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, val | O_NONBLOCK);
+}
 
 struct pollfd *eventfd;
 int maxi;
@@ -32,12 +40,8 @@ void * fd2conn[OPEN_MAX];
 
 int main() {
     /* init socket */
-    int sockfd, i, connfd, listenfd, nready;
-    ssize_t n;
-    struct sockaddr_in servaddr, cliaddr;
-    socklen_t clilen;
-    
-    char buf[MAXLINE];
+    int i, listenfd;
+    struct sockaddr_in servaddr;
     connection_t *c;
 
     /* init connection pool */
@@ -69,29 +73,38 @@ int main() {
 	exit(1);
     }
 
-    /*init event*/
-    eventfd = (struct pollfd  *) malloc(sizeof(struct pollfd) * OPEN_MAX);
+    set_nonblock(listenfd);
 
+    /*init event*/
+    event_init(OPEN_MAX);
+
+    /*add listenfd to event*/
     eventfd[0].fd = listenfd;
     eventfd[0].events = POLLRDNORM;
 
-    for(i = 1; i < OPEN_MAX; i++) {
-	eventfd[i].fd = -1;
-    }
     maxi = 0;
 
     err_msg("start ...\n");
+    event_process();
+
+    return 0;
+}
+
+void event_process() {
+    int nready, i;
+    connection_t *c;
+
     for( ; ; ) {
 	nready = poll(eventfd, maxi + 1, INFTIM);
 	
 	if(eventfd[0].revents & POLLRDNORM) {
-	    event_accept(listenfd);
+	    event_accept(eventfd[0].fd);
 	    if(--nready <= 0)
 		continue;
 	}
 
 	for(i = 1; i <= maxi; i++) {
-	    if((sockfd = eventfd[i].fd) < 0)
+	    if(eventfd[i].fd < 0)
 		continue;
 
 	    if(eventfd[i].revents & (POLLRDNORM | POLLERR)) {
@@ -109,6 +122,15 @@ int main() {
 	}
     }
 }
+void event_init(int max) {
+    int i;
+
+    eventfd = (struct pollfd  *) malloc(sizeof(struct pollfd) * max);
+
+    for(i = 0; i < max; i++) {
+	eventfd[i].fd = -1;
+    }
+}
 
 void event_read_handle(connection_t *c) {
     ssize_t n;
@@ -118,7 +140,7 @@ void event_read_handle(connection_t *c) {
 	if(errno == ECONNRESET) {
 	    event_del_conn(c);
 	} else {
-	    err_msg("read error");
+	    perror("read error");
 	    return;
 	}
     } else if(n == 0) {
@@ -130,7 +152,7 @@ void event_read_handle(connection_t *c) {
 	printf("read %d byte from fd %d, buf len %d\n", n, c->fd, c->rbuf.i - c->rbuf.o);
 
 	/*parse protocols*/
-	if((n = c->rbuf.i - c->rbuf.o) > 10) {
+	if((n = c->rbuf.i - c->rbuf.o) > 0) {
 	    chat_broadcast(c->rbuf.o, n);
 	    c->rbuf.o = c->rbuf.i = c->rbuf.buf;
 	}
@@ -148,7 +170,17 @@ int event_accept(int fd) {
     connection_t *c;
 
     clilen = sizeof(cliaddr);
-    connfd = accept(fd, (struct sockaddr *)&cliaddr, &clilen);
+    /* fd is nonblock,
+     * igrone the follow errno
+     * EWOULDBLOCK,ECONNABORTED,EPROTO,EINTR
+     */
+    if((connfd = accept(fd, (struct sockaddr *)&cliaddr, &clilen)) < 0) {
+	if(errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EPROTO || errno == EINTR) {
+	    return;
+	}
+	perror("accept error\n");
+	return;
+    }
 
     c = conn_get(connfd);
     if (c == NULL) {
@@ -156,6 +188,8 @@ int event_accept(int fd) {
 	close(connfd);
 	return 1;
     }
+    
+    set_nonblock(connfd);
 
     c->fd = connfd;
     c->time = time(NULL);
@@ -165,7 +199,7 @@ int event_accept(int fd) {
     dump_conn(c);
 
     /*say hello*/
-    chat_welcome(connfd);
+    chat_welcome(c);
     return event_add_conn(c);
 }
 
@@ -221,71 +255,6 @@ void err_msg(const char *buf) {
     
 }
 
-void chat_send(connection_t *c, const char *buf, size_t n) {
-    int i;
-    size_t nwritten;
-
-    /*no data in write buf*/
-    if(c->wbuf.i == c->wbuf.o) {
-	if((nwritten = write(c->fd, buf, n)) < 0) {
-	    /* socket send buffer has no space*/
-	    if(errno == EWOULDBLOCK) {
-		i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
-		/* data was large then wbuf, drop it*/
-		if(i < n) {
-		    return;
-		}
-		memcpy(c->wbuf.i, buf, n);
-		c->wbuf.i += n;
-		/* 
-		 * @todo add write on eventfd
-		 */
-		return;
-	    } else {
-		fprintf(stderr, "write error to socket");
-		return;
-	    }
-	}
-
-	if (nwritten == n) return;
-
-	i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
-	if(i < (n - nwritten)) {
-	    /**
-	     * @todo
-	     */
-	    return;
-	}
-	i = n - nwritten;
-
-	memcpy(c->wbuf.i, buf + nwritten, i);
-	c->wbuf.i += i;
-	return;
-    }
-
-    i = &c->wbuf.buf[MAXLINE] - c->wbuf.i;
-    if(i < n) {
-	return;
-    }
-    memcpy(c->wbuf.i, buf, n);
-    c->wbuf.i += n;
-
-    i = c->wbuf.i - c->wbuf.o;
-    if((nwritten = write(c->fd, c->wbuf.o, i)) < 0) {
-	/* socket send buffer has no space*/
-	if(errno == EWOULDBLOCK) {
-	    return;
-	} else {
-	    fprintf(stderr, "write error to socket");
-	    return;
-	}
-    }
-
-    c->wbuf.o += nwritten;
-    if(c->wbuf.o == c->wbuf.i)
-	c->wbuf.o = c->wbuf.i = c->wbuf.buf;
-}
-
 void chat_broadcast(const char *buf, size_t n) {
     int j = 1;
 
@@ -294,11 +263,12 @@ void chat_broadcast(const char *buf, size_t n) {
 	    continue;
 	}
 
-	chat_send(fd2conn[eventfd[j].fd], buf, n);
+	conn_write(fd2conn[eventfd[j].fd], buf, n);
     }
 }
 
-void chat_welcome(int fd){
-    static char c[] = "WELCOME!\n";
-    write(fd, c, strlen(c));
+void chat_welcome(connection_t *c){
+    static char s[] = "WELCOME!";
+
+    conn_write(c, s, strlen(s));
 }

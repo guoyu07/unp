@@ -27,5 +27,6 @@ typedef struct connection_s connection_t;
 connection_t * conn_init_pool(int);
 connection_t * conn_get(int);
 void conn_free(connection_t *);
+void conn_write(connection_t *, const char *, size_t);
 
 #endif /*_CONNECTION_H*/
