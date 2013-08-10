@@ -12,9 +12,9 @@ typedef struct{
     char data[CONN_BUF_LENGTH];
 } conn_buff_t;
 
-#define conn_buf_data_len(buf) (buf.i - buf.o)
-#define conn_buf_free_len(buf) (&buf.data[CONN_BUF_LENGTH] - buf.i)
-#define conn_buf_rewind(buf) (buf.i = buf.o = buf.data)
+#define CONN_BUF_DATA_LEN(buf) (buf.i - buf.o)
+#define CONN_BUF_FREE_LEN(buf) (&buf.data[CONN_BUF_LENGTH] - buf.i)
+#define CONN_BUF_REWIND(buf) (buf.i = buf.o = buf.data)
 
 struct connection_s {
     void *data;

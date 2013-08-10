@@ -29,8 +29,8 @@ connection_t * conn_init_pool(int n) {
 	next = &c[i];
 	
 	c[i].fd = -1;
-	conn_buf_rewind(c[i].rbuf);
-	conn_buf_rewind(c[i].wbuf);
+	CONN_BUF_REWIND(c[i].rbuf);
+	CONN_BUF_REWIND(c[i].wbuf);
     
     } while (i);
     
@@ -71,7 +71,7 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
 	if((nwritten = write(c->fd, buf, n)) < 0) {
 	    /* socket send buffer has no space*/
 	    if(errno == EWOULDBLOCK) {
-		i = conn_buf_free_len(c->wbuf);
+		i = CONN_BUF_FREE_LEN(c->wbuf);
 		/* data was large then wbuf, drop it*/
 		if(i < n) {
 		    return 0;
@@ -87,7 +87,7 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
 
 	if (nwritten == n) return 0;
 
-	i = conn_buf_free_len(c->wbuf);
+	i = CONN_BUF_FREE_LEN(c->wbuf);
 	/*
 	 * The remaining data is too large to buffer can't hold
 	 * This situation should be avoided
@@ -102,7 +102,7 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
 	return i;
     }
 
-    i = conn_buf_free_len(c->wbuf);
+    i = CONN_BUF_FREE_LEN(c->wbuf);
     /*
      * wbuf's free space is not enough to storage, drop it or other
      */
@@ -116,7 +116,7 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
     memcpy(c->wbuf.i, buf, n);
     c->wbuf.i += n;
 
-    i = conn_buf_data_len(c->wbuf);
+    i = CONN_BUF_DATA_LEN(c->wbuf);
     if((nwritten = write(c->fd, c->wbuf.o, i)) < 0) {
 	/* socket send buffer has no space*/
 	if(errno == EWOULDBLOCK) {
@@ -129,13 +129,13 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
 
     c->wbuf.o += nwritten;
     if(c->wbuf.o == c->wbuf.i) {
-	conn_buf_rewind(c->wbuf);
+	CONN_BUF_REWIND(c->wbuf);
 	return 0;
     }
 
-    return conn_buf_data_len(c->wbuf);
+    return CONN_BUF_DATA_LEN(c->wbuf);
 }
 
 ssize_t conn_flush_wbuf(connection_t *c) {
-    return conn_buf_data_len(c->wbuf);
+    return CONN_BUF_DATA_LEN(c->wbuf);
 }
