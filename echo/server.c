@@ -138,7 +138,7 @@ void event_read_handle(connection_t *c) {
     ssize_t n;
     char buf[MAXLINE];
 
-    if((n = read(c->fd, c->rbuf.i, &c->rbuf.buf[MAXLINE] - c->rbuf.i)) < 0) {
+    if((n = read(c->fd, c->rbuf.i, conn_buf_free_len(c->rbuf))) < 0) {
 	if(errno == ECONNRESET) {
 	    event_del_conn(c);
 	} else {
@@ -154,9 +154,9 @@ void event_read_handle(connection_t *c) {
 	printf("read %d byte from fd %d, buf len %d\n", n, c->fd, c->rbuf.i - c->rbuf.o);
 
 	/*parse protocols*/
-	if((n = c->rbuf.i - c->rbuf.o) > 0) {
+	if((n = conn_buf_data_len(c->rbuf)) > 0) {
 	    chat_broadcast(c->rbuf.o, n);
-	    c->rbuf.o = c->rbuf.i = c->rbuf.buf;
+	    conn_buf_rewind(c->rbuf);
 	}
     }
 }

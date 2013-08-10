@@ -4,11 +4,17 @@
 #ifndef _CONNECTION_H
 #define _CONNECTION_H 1
 
+#define CONN_BUF_LENGTH 1024
+
 typedef struct{
     char *o;
     char *i;
-    char buf[MAXLINE];
+    char data[CONN_BUF_LENGTH];
 } conn_buff_t;
+
+#define conn_buf_data_len(buf) (buf.i - buf.o)
+#define conn_buf_free_len(buf) (&buf.data[CONN_BUF_LENGTH] - buf.i)
+#define conn_buf_rewind(buf) (buf.i = buf.o = buf.data)
 
 struct connection_s {
     void *data;
