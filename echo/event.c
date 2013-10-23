@@ -122,7 +122,7 @@ event_read_handle(connection_t *c)
 	event_del_conn(c);
     } else {
 	c->rbuf.i += n;
-	printf("read %d byte from fd %d, buf len %d\n", n, c->fd, c->rbuf.i - c->rbuf.o);
+	printf("read %d byte from fd %d, buf len %d\n", n, c->fd, CONN_BUF_DATA_LEN(c->rbuf));
 
 	/*parse protocols*/
 	if((n = CONN_BUF_DATA_LEN(c->rbuf)) > 0) {
