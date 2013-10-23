@@ -139,3 +139,17 @@ ssize_t conn_write(connection_t *c, const char *buf, size_t n) {
 ssize_t conn_flush_wbuf(connection_t *c) {
     return CONN_BUF_DATA_LEN(c->wbuf);
 }
+
+void
+dump_conn(connection_t *c) 
+{
+    char buf[MAXLINE];
+    struct sockaddr_in *s;
+    
+    s = (struct sockaddr_in *)&c->ip;
+
+    printf("-%.24s connection from %s:%d at %d\n",
+	ctime(&c->time),
+	inet_ntop(AF_INET, &s->sin_addr, buf, sizeof(buf)),
+	ntohs(s->sin_port), c->fd);
+}

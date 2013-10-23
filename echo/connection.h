@@ -34,5 +34,6 @@ connection_t * conn_init_pool(int);
 connection_t * conn_get(int);
 void conn_free(connection_t *);
 ssize_t conn_write(connection_t *, const char *, size_t);
+void dump_conn(connection_t *);
 
 #endif /*_CONNECTION_H*/
